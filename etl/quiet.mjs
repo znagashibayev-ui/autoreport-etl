@@ -39,7 +39,10 @@ if (process.env.CLOUDFLARE_API_TOKEN && (code !== 0 || KEEP_OK.has(name))) {
   try {
     const { d1ExecFile } = await import('./lib/cloudflare.mjs');
     const { sqlLiteral } = await import('./lib/sql.mjs');
-    const tail = full.length > 60000 ? '[…начало обрезано…]\n' + full.slice(-60000) : full;
+    // лимит D1 — 100 КБ в байтах на выражение (кириллица — 2 байта, «—»/«✔» — 3): режем по байтам
+    let tail = full;
+    while (Buffer.byteLength(tail) > 80000) tail = tail.slice(-Math.floor(tail.length * 0.9));
+    if (tail !== full) tail = '[…начало обрезано…]\n' + tail;
     const ctx = [process.env.PLATFORM, process.env.START, process.env.END, process.env.DEALERS].filter(Boolean).join(' ');
     d1ExecFile([
       'CREATE TABLE IF NOT EXISTS etl_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, name TEXT NOT NULL, ctx TEXT, exit_code INTEGER, gh_run TEXT, log TEXT);',

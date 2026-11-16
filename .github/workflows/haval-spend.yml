@@ -42,7 +42,7 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
       HAVAL_REPORT_KEY: ${{ secrets.HAVAL_REPORT_KEY }}
-      HAVAL_DEALERS_JSON: ${{ vars.HAVAL_DEALERS_JSON }}
+      HAVAL_DEALERS_JSON: ${{ secrets.HAVAL_DEALERS_JSON }}
       FROM: ${{ inputs.from }}
       TO: ${{ inputs.to }}
       NO_WRITE: ${{ inputs.no_write }}
