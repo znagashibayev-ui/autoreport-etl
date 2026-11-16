@@ -39,9 +39,9 @@ jobs:
       MONTHS: ${{ inputs.months }}
       DEALERS: ${{ inputs.dealers }}
       # бюджеты кампаний Google Ads (шаг «Дневные бюджеты из кабинетов»)
-      GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
-      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
-      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.SECRET_GOOGLE_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.SECRET_GOOGLE_DEV_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
