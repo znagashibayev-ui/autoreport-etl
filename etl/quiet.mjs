@@ -50,11 +50,15 @@ if (process.env.CLOUDFLARE_API_TOKEN && (code !== 0 || KEEP_OK.has(name))) {
       `INSERT INTO etl_logs (at, name, ctx, exit_code, gh_run, log) VALUES (${sqlLiteral(started)}, ${sqlLiteral(name)}, ${sqlLiteral(ctx)}, ${code}, ${sqlLiteral(process.env.GITHUB_RUN_ID || '')}, ${sqlLiteral(tail)});`
     ].join('\n'), 'etl_log');
   } catch (err) {
-    console.log('Журнал в базу не записан: ' + String(err.message).split('\n')[0].slice(0, 160));
+    console.log('Журнал в базу не записан: ' + String(err.message).replace(/\d{6,}/g, '#').split('\n').filter((l) => l.trim()).slice(0, 8).join(' | ').slice(0, 700));
   }
 }
 fs.rmSync(dir, { recursive: true, force: true });
 // при сбое — до трёх строк с текстом ошибки (без данных), чтобы причину было видно в журнале GitHub
-if (code !== 0) full.split('\n').filter((l) => /error|ошибк|denied|unauthor|forbidden|403|401|Authentication/i.test(l)).slice(0, 3).forEach((l) => console.log('  ! ' + l.replace(/\d{6,}/g, '#').slice(0, 200)));
+if (code !== 0) {
+  const ls = full.split('\n');
+  const i = Math.max(0, ls.findIndex((l) => /error|ошибк/i.test(l)));
+  ls.slice(i, i + 12).filter((l) => l.trim()).forEach((l) => console.log('  ! ' + l.replace(/\d{6,}/g, '#').slice(0, 220)));
+}
 console.log(`${code === 0 ? '✔' : '✖'} ${name}: код ${code}, ${lines} строк журнала скрыты (подробности — в базе, таблица etl_logs).`);
 process.exit(code);
