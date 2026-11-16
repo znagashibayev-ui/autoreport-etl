@@ -1,0 +1,75 @@
+# Пересчёт недолётов: медиапланы (Ads Data) против D1 → раздел «Недолёты» админки.
+# Само: каждый час с 08:40 до 20:40 по Алматы — запускает сайт (Cloudflare Cron): расписание GitHub срабатывало с опозданием на часы. Вручную — кнопка «Пересчитать сейчас» в разделе «Недолёты».
+name: Пересчёт недолётов
+
+on:
+  workflow_dispatch:
+    inputs:
+      months:
+        description: 'Месяцы через запятую YYYY-MM (пусто = текущий, до 10-го числа и прошлый)'
+        type: string
+        default: ''
+      dealers:
+        description: 'Только эти Dealer_ID через запятую (пусто = все из Registry)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gaps
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gaps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      MONTHS: ${{ inputs.months }}
+      DEALERS: ${{ inputs.dealers }}
+      # бюджеты кампаний Google Ads (шаг «Дневные бюджеты из кабинетов»)
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Схема базы D1
+        run: npx wrangler d1 migrations apply autoreport --remote
+
+      - name: Пауза?
+        run: node etl/guard.mjs gaps
+
+      - name: Пересчёт
+        if: env.SKIP != '1'
+        run: node etl/quiet.mjs etl/gaps.mjs
+
+      # план «Общий бюджет» (S) ушёл от утверждённого из-за долей кампаний — раздать разницу и оставить уведомление (etl/mp_autofix.mjs)
+      - name: Автовыравнивание плана
+        if: always() && env.SKIP != '1'
+        continue-on-error: true
+        run: node etl/quiet.mjs etl/mp_autofix.mjs
+
+      # Текущие дневные бюджеты кампаний из кабинетов → «Медиапланы» → «Новая кампания». Ошибка не ломает недолёты.
+      - name: Дневные бюджеты из кабинетов
+        if: always() && env.SKIP != '1'
+        continue-on-error: true
+        run: node etl/quiet.mjs etl/budgets.mjs

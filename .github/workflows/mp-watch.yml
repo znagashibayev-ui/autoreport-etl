@@ -1,0 +1,57 @@
+# «Медиаплан: правка в таблице» — лёгкая проверка медиаплана дилера сразу после правки: снимок листа месяца → журнал изменений
+# (что, было → стало, когда, кто) и «Общий бюджет» (S) в разделе «Медиапланы». Запускает сайт, когда Google Drive сообщил о правке таблицы.
+name: 'Медиаплан: правка в таблице'
+run-name: 'Правка медиаплана · ${{ inputs.dealers }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      dealers:
+        description: 'Dealer_ID через запятую (дилеры этой таблицы)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mp-watch-${{ inputs.dealers }}
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      DEALERS: ${{ inputs.dealers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Схема базы D1
+        run: npx wrangler d1 migrations apply autoreport --remote
+
+      - name: Снимок и журнал медиаплана
+        run: node etl/quiet.mjs etl/mp_watch.mjs
+
+      # план «Общий бюджет» (S) ушёл от утверждённого из-за долей кампаний — раздать разницу и оставить уведомление (etl/mp_autofix.mjs)
+      - name: Автовыравнивание плана
+        if: always() && env.SKIP != '1'
+        continue-on-error: true
+        run: node etl/quiet.mjs etl/mp_autofix.mjs

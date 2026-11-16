@@ -1,0 +1,72 @@
+# Снимки дашборда дилеров (этап 4 переезда): D1 → snap/<Dealer_ID>.json.gz в R2, затем сверка со старым дашбордом (BigQuery).
+# Запуск: сам после «Ночной выгрузки»; вручную — Actions → «Снимки дашборда» → Run workflow;
+# при изменении кода снимков в main.
+name: Снимки дашборда
+
+on:
+  workflow_run:
+    workflows: ['Ночная выгрузка', 'Расход Haval/Tank', 'Восстановление недолётов', 'Копия из BigQuery', 'Google Ads: токен MCC']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      dealers:
+        description: 'Только эти Dealer_ID через запятую (пусто = все)'
+        type: string
+        default: ''
+      verify_dealers:
+        description: 'Сверка: Dealer_ID через запятую'
+        type: string
+        default: 'Distributor_BMW,Dealer_BMW_Almaty,Distributor_Haval'
+      verify_months:
+        description: 'Сверка: месяцы YYYY-MM через запятую'
+        type: string
+        default: '2026-09,2026-10'
+  push:
+    branches: [main]
+    paths:
+      - 'etl/build_snapshots.mjs'
+      - 'etl/verify_snapshots.mjs'
+      - 'etl/lib/snapshot.mjs'
+      - '.github/workflows/snapshots.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: snapshots
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  snapshots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      DEALERS: ${{ inputs.dealers }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Снимки
+        run: node etl/quiet.mjs etl/build_snapshots.mjs
+
+      - name: Сверка со старым дашбордом
+        env:
+          DEALERS: ${{ inputs.verify_dealers }}
+          MONTHS: ${{ inputs.verify_months }}
+        run: node etl/quiet.mjs etl/verify_snapshots.mjs

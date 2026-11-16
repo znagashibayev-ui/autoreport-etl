@@ -1,0 +1,66 @@
+# «Google Ads: токен MCC». Дилерам, у которых в листе Total есть Google_Customer_ID, но нет Google_Token, вписывает рабочий
+# токен с доступом к MCC 5297548449 (выгрузка ходит через MCC — личный токен дилера не нужен), затем загружает их Google Ads
+# в D1 и синхронизирует таблицы. Показывает аккаунты MCC, не привязанные ни к одному дилеру. Запуск — админка → «Задания».
+name: 'Google Ads: токен MCC'
+run-name: 'Google Ads: токен MCC · ${{ inputs.apply == ''1'' && ''запись'' || ''проверка'' }}'
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: '1 = записать токен и загрузить данные; 0 = только показать, что будет сделано'
+        type: choice
+        default: '0'
+        options: ['0', '1']
+      start:
+        description: 'Загружать Google Ads с даты YYYY-MM-DD'
+        type: string
+        default: '2026-01-01'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: google-mcc
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  mcc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+      NODE_OPTIONS: --max-old-space-size=4096
+      APPLY: ${{ inputs.apply }}
+      START: ${{ inputs.start }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Дата
+        run: |
+          echo "$START" | grep -Eq '^20[0-9]{2}-[0-9]{2}-[0-9]{2}$' || { echo "Неверная дата: $START"; exit 1; }
+
+      - run: npm ci
+
+      - name: Схема базы D1
+        run: npx wrangler d1 migrations apply autoreport --remote
+
+      - name: Токен MCC и загрузка
+        run: node etl/quiet.mjs etl/google_mcc.mjs

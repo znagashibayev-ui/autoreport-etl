@@ -1,0 +1,45 @@
+# «Медиапланы: подписка на правки» — просит Google Drive сообщать сайту о каждой правке таблиц медиапланов
+# (адрес WATCH_URL). Канал живёт сутки, поэтому сайт запускает задание дважды в день (06:05 и 18:05 по Алматы) и меняет каналы.
+name: 'Медиапланы: подписка на правки'
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mp-watch-register
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      WATCH_URL: https://autoreport-control.dm-astana-motors.kz/hook/drive
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Схема базы D1
+        run: npx wrangler d1 migrations apply autoreport --remote
+
+      - name: Подписка на правки таблиц
+        run: node etl/quiet.mjs etl/mp_watch_register.mjs

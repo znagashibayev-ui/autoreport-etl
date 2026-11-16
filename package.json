@@ -1,0 +1,10 @@
+{
+  "name": "autoreport-etl",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Выгрузка AutoReport (Astana Motors) в Cloudflare D1 — задания GitHub Actions",
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "4.156.2"
+  }
+}

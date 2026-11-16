@@ -1,0 +1,8 @@
+{
+  // Нужен только для «wrangler d1 migrations apply autoreport --remote» и запросов к базе из заданий.
+  "name": "autoreport-etl",
+  "compatibility_date": "2026-10-01",
+  "d1_databases": [
+    { "binding": "DB", "database_name": "autoreport", "database_id": "9d669190-f420-43be-aa8b-a4cece7c5164", "migrations_dir": "migrations" }
+  ]
+}

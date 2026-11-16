@@ -1,0 +1,97 @@
+# Перенос истории из BigQuery в Cloudflare (этап 1 переезда).
+# Запуск: GitHub → Actions → «Перенос из BigQuery» → Run workflow → выбрать режим.
+# Проверочные запуски: push в ветку selftest — режим и месяцы берутся из etl/selftest.json.
+# BigQuery только читается. Пишется только новая база D1 «autoreport» и хранилище R2 «autoreport-data».
+name: Перенос из BigQuery
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Что делать'
+        type: choice
+        default: inventory
+        options:
+          - inventory   # опись: какие таблицы и сколько строк (ничего не пишет)
+          - daily       # daily_statistics → D1, со сверкой каждого месяца
+          - access      # dealer_email_access → D1
+          - segments    # segments_statistics → R2 (Parquet), со сверкой; готовые месяцы пропускаются
+          - verify      # только сверка daily_statistics BigQuery ↔ D1
+          - all         # daily + access + segments одним запуском
+      months:
+        description: 'Месяцы: all | 2026-09 | 2026-01..2026-06'
+        type: string
+        default: all
+  push:
+    branches: [selftest]
+
+permissions:
+  contents: read
+  id-token: write   # вход в Google без ключа (Workload Identity Federation)
+
+concurrency:
+  group: migrate-bigquery
+  cancel-in-progress: false
+
+# оболочка bash одинакова на GitHub-серверах и на своём компьютере (раннер на Windows)
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      DUCKDB_BIN: ${{ github.workspace }}/.bin/duckdb
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Режим запуска
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            MODE=$(node -p "require('./etl/selftest.json').mode")
+            MONTHS=$(node -p "require('./etl/selftest.json').months")
+          else
+            MODE="${{ inputs.mode }}"
+            MONTHS="${{ inputs.months }}"
+          fi
+          echo "MODE=$MODE" >> "$GITHUB_ENV"
+          echo "MONTHS=$MONTHS" >> "$GITHUB_ENV"
+          echo "Режим: $MODE, месяцы: $MONTHS"
+
+      - name: Проверка секретов
+        run: |
+          if [ -z "$GCP_WIF_PROVIDER" ] && [ -z "$GCP_SA_KEY" ]; then
+            echo "::error::Нет доступа к Google: добавьте переменную GCP_WIF_PROVIDER (Settings → Secrets and variables → Actions → Variables)"; exit 1
+          fi
+          if [ "$MODE" != "inventory" ]; then
+            test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Нет секрета CLOUDFLARE_API_TOKEN"; exit 1; }
+          fi
+
+      - run: npm ci
+
+      - name: DuckDB (для Parquet)
+        run: |
+          mkdir -p .bin
+          curl -sSL -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.2.2/duckdb_cli-linux-amd64.zip
+          unzip -o duckdb.zip -d .bin
+          .bin/duckdb --version
+
+      - name: Схема базы D1
+        run: |
+          if [ "$MODE" != "inventory" ]; then npx wrangler d1 migrations apply autoreport --remote; fi
+
+      - name: Перенос
+        run: node etl/quiet.mjs etl/migrate_bq.mjs
