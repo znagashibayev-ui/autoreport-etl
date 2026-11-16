@@ -54,5 +54,7 @@ if (process.env.CLOUDFLARE_API_TOKEN && (code !== 0 || KEEP_OK.has(name))) {
   }
 }
 fs.rmSync(dir, { recursive: true, force: true });
+// при сбое — до трёх строк с текстом ошибки (без данных), чтобы причину было видно в журнале GitHub
+if (code !== 0) full.split('\n').filter((l) => /error|ошибк|denied|unauthor|forbidden|403|401|Authentication/i.test(l)).slice(0, 3).forEach((l) => console.log('  ! ' + l.replace(/\d{6,}/g, '#').slice(0, 200)));
 console.log(`${code === 0 ? '✔' : '✖'} ${name}: код ${code}, ${lines} строк журнала скрыты (подробности — в базе, таблица etl_logs).`);
 process.exit(code);
