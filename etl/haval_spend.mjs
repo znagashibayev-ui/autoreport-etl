@@ -47,7 +47,7 @@ const toNum = (v) => (v === '' || v === null || v === undefined ? 0 : Number(v))
 /** NDJSON-ответ → строки таблицы. Битая строка — ошибка всей выгрузки (лучше не записать, чем записать криво). */
 export function parseRows(text, period, loaded) {
   const rows = [];
-  const seen = new Set();
+  const seen = new Map();
   String(text || '').split(/\r?\n/).forEach((line, i) => {
     if (!line.trim()) return;
     let o;
@@ -57,7 +57,7 @@ export function parseRows(text, period, loaded) {
       account_id: String(o.account_id ?? '').trim(),
       account_name: o.account_name == null ? null : String(o.account_name),
       dealership: o.dealership == null || o.dealership === '' ? null : String(o.dealership),
-      mark: o.mark == null || o.mark === '' ? null : String(o.mark),
+      mark: o.mark == null ? '' : String(o.mark),
       currency: o.currency == null || o.currency === '' ? null : String(o.currency),
       spend: toNum(o.spend),
       impressions: toNum(o.impressions),
@@ -72,9 +72,14 @@ export function parseRows(text, period, loaded) {
       if (!Number.isFinite(r[k]) || r[k] < 0) throw new Error(`Строка ${i + 1}: ${k} = «${o[k]}»`);
     }
     for (const k of ['impressions', 'clicks', 'meta_leads']) r[k] = Math.round(r[k]);
-    const key = r.date + '|' + r.account_id;
-    if (seen.has(key)) throw new Error(`Повтор: ${r.date} × кабинет ${r.account_id}`);
-    seen.add(key);
+    // Кабинет «Haval+Tank» приходит строкой на каждую марку; полный повтор той же строки (кабинет виден через два BM) пропускаем.
+    const key = r.date + '|' + r.account_id + '|' + r.mark;
+    const same = (a) => ['spend', 'impressions', 'clicks', 'meta_leads'].every((k) => a[k] === r[k]);
+    if (seen.has(key)) {
+      if (same(seen.get(key))) return;
+      throw new Error(`Повтор с разными цифрами: ${r.date} × кабинет ${r.account_id} × ${r.mark || 'без марки'}`);
+    }
+    seen.set(key, r);
     rows.push(r);
   });
   return rows;
@@ -110,8 +115,9 @@ export async function fetchPeriod(key, q, fetchFn = fetch) {
   const loaded = new Date().toISOString();
   const rows = parseRows(body, period, loaded);
   const declared = res.headers.get('X-Report-Rows');
-  if (declared !== null && declared !== '' && Number(declared) !== rows.length) {
-    throw new Error(`Воркер заявил ${declared} строк, пришло ${rows.length} — ответ обрезан; ничего не записано`);
+  const got = body.split(/\r?\n/).filter((l) => l.trim()).length; // строки ответа, включая пропущенные повторы
+  if (declared !== null && declared !== '' && Number(declared) !== got) {
+    throw new Error(`Воркер заявил ${declared} строк, пришло ${got} — ответ обрезан; ничего не записано`);
   }
   const unmapped = Number(res.headers.get('X-Unmapped-Accounts') || 0);
   return { period, rows, unmapped };

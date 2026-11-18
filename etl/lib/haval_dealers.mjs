@@ -14,7 +14,14 @@ export const normAccount = (v) => String(v || '').trim().replace(/^act_/i, '');
 
 export function loadMap(file = decodeURIComponent(MAP_FILE)) {
   // В публичном репозитории файла со списком кабинетов нет: он лежит в переменной репозитория HAVAL_DEALERS_JSON.
-  const raw = JSON.parse(process.env.HAVAL_DEALERS_JSON || fs.readFileSync(file, 'utf8'));
+  const text = process.env.HAVAL_DEALERS_JSON || fs.readFileSync(file, 'utf8');
+  let raw;
+  try { raw = JSON.parse(text); } catch { raw = null; }
+  if (!raw || typeof raw !== 'object' || !raw.accounts || typeof raw.accounts !== 'object') {
+    throw new Error('Секрет HAVAL_DEALERS_JSON испорчен: в нём не список кабинетов (например, текст «[object Object]»). ' +
+      'GitHub → репозиторий autoreport-etl → Settings → Secrets and variables → Actions → HAVAL_DEALERS_JSON → Update: ' +
+      'вставьте целиком содержимое файла _HAVAL_DEALERS_JSON_для_переменной_GitHub.json');
+  }
   const out = new Map();
   for (const [acc, v] of Object.entries(raw.accounts || {})) {
     const id = String(typeof v === 'string' ? v : v.dealer_id || '').trim();
@@ -54,6 +61,7 @@ export function plan(spendRows, map, nightly) {
     const a = normAccount(r.account_id);
     if (!accounts.has(a)) accounts.set(a, { account_id: a, account_name: r.account_name, dealership: r.dealership, mark: r.mark, spend: 0 });
     accounts.get(a).spend += r.spend;
+    if (accounts.get(a).mark !== r.mark) accounts.get(a).mark = 'Haval+Tank'; // смешанный кабинет: строки по маркам
   }
   const write = new Map();
   const report = [];
