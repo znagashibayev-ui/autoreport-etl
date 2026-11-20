@@ -111,6 +111,8 @@ async function postJson(url, init, fetchImpl, retryMs) {
     // лимит запросов (RESOURCE_EXHAUSTED): дольше и чаще — по подсказке Google «retryDelay», не больше минуты за раз
     if (res.status === 429 && attempt < 5) {
       const hint = JSON.stringify(json || {}).match(/"retryDelay"\s*:\s*"(\d+)(?:\.\d+)?s"/);
+      // ждать больше минуты — исчерпан дневной лимит developer token: повторы лишь вешали ночную выгрузку на 5 мин на дилера
+      if (hint && Number(hint[1]) > 60) throw new Error(`RESOURCE_EXHAUSTED: дневной лимит Google Ads API исчерпан, Google просит подождать ${Math.ceil(Number(hint[1]) / 60)} мин`);
       await sleep(Math.min(60000, Math.max(retryMs * 3 ** (attempt + 1), hint ? Number(hint[1]) * 1000 : 0)));
       continue;
     }
@@ -422,6 +424,7 @@ async function applyHubEtalon(monthlyConvByCamp, monthsList, search, dealerId, h
       }
     }
   } catch (e) {
+    if (/RESOURCE_EXHAUSTED/.test(e.message)) throw e; // дневной лимит — дилер падает целиком, а не пишется без эталона
     warn(`❌ GHR [${dealerId}]: ${e.message} — эталон Google оставлен по прежним правилам ETL`);
   }
 }
