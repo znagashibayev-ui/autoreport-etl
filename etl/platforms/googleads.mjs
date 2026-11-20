@@ -152,13 +152,19 @@ export async function googleDealerRows(o) {
   /** Все страницы запроса: {results} или {error}. */
   async function search(query) {
     let results = []; let pageToken = null;
-    do {
+    for (;;) {
       const j = await postJson(url, { method: 'POST', headers, body: JSON.stringify(pageToken ? { query, pageToken } : { query }) }, fetchImpl, retryMs);
+      // кабинет не под MCC, но владелец токена имеет к нему прямой доступ — дальше этот кабинет читается без MCC
+      if (j.error && !pageToken && headers['login-customer-id'] && /does not have permission/i.test(String(j.error.message))) {
+        delete headers['login-customer-id'];
+        warn(`ℹ️ ${label}: кабинет не под MCC ${GOOGLE_LOGIN_CUSTOMER_ID} — читается напрямую по доступу владельца токена.`);
+        continue;
+      }
       if (j.error) return { error: String(j.error.message || JSON.stringify(j.error)).slice(0, 300) };
       if (j.results) results = results.concat(j.results);
       pageToken = j.nextPageToken || null;
-    } while (pageToken);
-    return { results };
+      if (!pageToken) return { results };
+    }
   }
   const between = (f, t) => "segments.date BETWEEN '" + f + "' AND '" + t + "'";
 
