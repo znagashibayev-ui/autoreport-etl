@@ -13,6 +13,7 @@ import { googleBudgets, metaBudgets, tiktokBudgets, yandexBudgets } from './lib/
 
 const COLS = ['dealer', 'platform', 'account', 'campaign', 'status', 'daily', 'total', 'currency', 'mode', 'note', 'checked'];
 const PARALLEL = 4;
+const GOOGLE_EVERY_MS = 6 * 3600000 - 15 * 60000; // 6 ч с запасом на разброс запуска часового задания
 const summary = [];
 const say = (s) => { console.log(s); summary.push(s); };
 const str = (v) => (v === null || v === undefined ? '' : typeof v === 'number' ? v.toFixed(0) : String(v).trim());
@@ -68,6 +69,14 @@ async function main() {
     say('⚠️ Нет секретов GOOGLE_ADS_* — бюджеты Google Ads не читаются.');
     list = list.filter((a) => a.platform !== 'Google Ads');
   }
+  // по расписанию (каждый час) Google читается не чаще раза в 6 ч — общий дневной лимит developer token; кнопка (DEALERS) читает всегда
+  if (!only.length) {
+    const since = new Date(Date.now() - GOOGLE_EVERY_MS).toISOString();
+    const fresh = new Set(d1Query(`SELECT DISTINCT dealer FROM cc_budgets WHERE platform = 'Google Ads' AND checked > ${sqlLiteral(since)}`).map((r) => r.dealer));
+    const before = list.length;
+    list = list.filter((a) => a.platform !== 'Google Ads' || !fresh.has(a.dealer));
+    if (before > list.length) say(`Google Ads: ${before - list.length} кабинетов прочитаны меньше 6 ч назад — пропущены до следующего окна.`);
+  }
   say(`# Дневные бюджеты из кабинетов: ${dealers.length} дилеров, ${list.length} кабинетов`);
 
   const now = new Date().toISOString();
@@ -94,7 +103,9 @@ async function main() {
   for (const r of rows) { const k = [r.dealer, r.platform, r.account, r.campaign].join('|'); if (!uniq.has(k)) uniq.set(k, r); }
   const touched = [...new Set(list.map((a) => a.dealer))];
   if (touched.length) {
-    d1ExecFile([`DELETE FROM cc_budgets WHERE dealer IN (${touched.map(sqlLiteral).join(', ')});`, ...buildInserts('cc_budgets', COLS, [...uniq.values()])].join('\n') + '\n', 'budgets');
+    // заменяются только прочитанные дилер × площадка: Google между чтениями сохраняет прежние строки
+    const pairs = [...new Set(list.map((a) => `(dealer = ${sqlLiteral(a.dealer)} AND platform = ${sqlLiteral(a.platform)})`))];
+    d1ExecFile([`DELETE FROM cc_budgets WHERE ${pairs.join(' OR ')};`, ...buildInserts('cc_budgets', COLS, [...uniq.values()])].join('\n') + '\n', 'budgets');
   }
   const withDaily = [...uniq.values()].filter((r) => r.daily).length;
   say(`Кампаний: ${uniq.size - errors.length}, с дневным бюджетом: ${withDaily}. Кабинетов с ошибкой: ${errors.length}.`);
