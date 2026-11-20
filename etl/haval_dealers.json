@@ -1,0 +1,29 @@
+{
+  "_": "Кабинет Meta (ID без act_) → Dealer_ID в отчёте. Пусто — кабинет в отчёт не пишется. Первое слово после Dealer_ — бренд-группа на дашборде. Crystal_Haval_Astana, Crystal_Haval_Karaganda, TANKARB_Almaty уже есть в All_Tokens (Google/Яндекс) без кабинета Meta — их Meta добавляется к ним. 06.11.2026.",
+  "accounts": {
+    "1925912145007648": "Dealer_Haval_Aktau",
+    "805657005646660": "Dealer_Haval_Atyrau",
+    "1127154012854634": "Crystal_Haval_Karaganda",
+    "2001330897298846": "Dealer_Tank_Crystal_Karaganda",
+    "2028830847852470": "Dealer_Haval_Luxcar_Shymkent",
+    "1173517141427660": "Dealer_Tank_Luxcar_Shymkent",
+    "347263835117569": "Dealer_Haval_Nomadcar_Shymkent",
+    "860663515476277": "Dealer_Tank_Nomadcar_Shymkent",
+    "1950349965818729": "Dealer_Haval_Kamkor_Pavlodar",
+    "703619255666436": "Dealer_Tank_Kamkor_Pavlodar",
+    "719224104077409": "Dealer_Tank_Zhayik_Uralsk",
+    "2172548679866893": "Dealer_Haval_Kol_Auto_Aktobe",
+    "1143540561208428": "Crystal_Haval_Astana",
+    "2146042452605581": "Dealer_Haval_Ekibastuz",
+    "3949703402004908": "Dealer_Haval_Kokshetau",
+    "986897997787091": "Dealer_Haval_NS_Premium_Astana",
+    "647547594697577": "Dealer_Haval_Oskemen",
+    "1083397460114476": "Dealer_Haval_Qalqaman_Almaty",
+    "1430535125383470": "Dealer_Tank_Aktobe",
+    "827872922637070": "TANKARB_Almaty",
+    "26896041600082713": "Dealer_Tank_Kokshetau",
+    "27031502386487692": "Dealer_Tank_Kostanai",
+    "1481158577086466": "Dealer_Haval_Turkistan",
+    "1408974954188789": "Dealer_Haval_Kyzylorda"
+  }
+}
