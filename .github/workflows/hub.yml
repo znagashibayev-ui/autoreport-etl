@@ -1,0 +1,86 @@
+# «Autoreport Hub» — тот же код Hub, что был в Apps Script таблицы Autoreport Hub (etl/hub/*.gs без изменений), но без Apps Script:
+# выгрузка Google Ads / Meta / TikTok / Яндекс → блоки «месяц Х» в листе «Ads Data» медиаплана каждого дилера.
+# Вкладки Hub живут в базе сайта (D1) и правятся в разделе «Autoreport Hub». Запускает сайт: по расписанию и кнопками раздела.
+name: 'Autoreport Hub'
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'daily — текущий месяц; monthly-auto — прошлый месяц, только в MONTHLY_DAY; monthly — прошлый месяц; custom — месяцы; dealer — дилеры; check — проверка; merge / merge-preview — склейка дублей; continue — доделать прерванную очередь; import — забрать вкладки из старой таблицы Hub; mirror — копия настроек в старую таблицу'
+        type: choice
+        options: [daily, monthly-auto, monthly, custom, dealer, check, merge, merge-preview, continue, import, mirror]
+        default: daily
+      months:
+        description: 'Месяцы для custom / dealer: 2026-05 или 2026-01..2026-07 (dealer: пусто — текущий)'
+        type: string
+        default: ''
+      dealers:
+        description: 'Dealer_ID через запятую (для dealer)'
+        type: string
+        default: ''
+      dry:
+        description: '1 — без записи в медиапланы, Telegram и старую таблицу Hub'
+        type: choice
+        options: ['0', '1']
+        default: '0'
+
+run-name: 'Hub · ${{ inputs.mode }} ${{ inputs.months }} ${{ inputs.dealers }}${{ inputs.dry == ''1'' && '' · без записи'' || '''' }}'
+
+permissions:
+  contents: read
+  id-token: write
+  actions: write   # задание само запускает продолжение очереди (режим continue)
+
+# один запуск Hub за раз: очередь и вкладки общие. Копия настроек (mirror) — отдельно: иначе её постановка в очередь
+# вытеснила бы ждущую ежедневную выгрузку (GitHub оставляет в группе только один ждущий запуск). Проверка только читает МП — тоже отдельно.
+concurrency:
+  group: hub-${{ (inputs.mode == 'mirror' || inputs.mode == 'check') && inputs.mode || 'run' }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  hub:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TZ: Asia/Almaty
+      GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: autoreport-github@astana-motors-accounts.iam.gserviceaccount.com
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: 0838b70724fe618572d61977794ba2e0
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.SECRET_GOOGLE_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.SECRET_GOOGLE_CLIENT_SECRET }}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.SECRET_GOOGLE_DEV_TOKEN }}
+      HUB_META_TOKEN: ${{ secrets.HUB_META_TOKEN }}
+      HUB_TIKTOK_TOKEN: ${{ secrets.HUB_TIKTOK_TOKEN }}
+      HUB_YANDEX_TOKEN: ${{ secrets.HUB_YANDEX_TOKEN }}
+      HUB_TELEGRAM_BOT_TOKEN: ${{ secrets.HUB_TELEGRAM_BOT_TOKEN }}
+      HUB_TELEGRAM_CHAT_ID: ${{ secrets.HUB_TELEGRAM_CHAT_ID }}
+      GITHUB_TOKEN: ${{ github.token }}
+      HUB_MODE: ${{ inputs.mode }}
+      HUB_MONTHS: ${{ inputs.months }}
+      HUB_DEALERS: ${{ inputs.dealers }}
+      HUB_DRY: ${{ inputs.dry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Самопроверка переходника Hub
+        run: node etl/hub_selftest.mjs
+
+      - name: Схема базы D1
+        run: npx wrangler d1 migrations apply autoreport --remote
+
+      - name: Autoreport Hub
+        run: node etl/hub_run.mjs
