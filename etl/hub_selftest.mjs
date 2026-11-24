@@ -1,7 +1,7 @@
 // Самопроверка «Autoreport Hub на сайте» без сети: настоящий код Hub (etl/hub/*.gs) + переходник, ответы API и таблиц подменены.
 // Запуск: TZ=Asia/Almaty node etl/hub_selftest.mjs
 import assert from 'node:assert/strict';
-import { buildHub, runMode, mergeRegistryStatus, saveSql, totalTokens } from './hub_run.mjs';
+import { buildHub, runMode, mergeRegistryStatus, saveSql, totalTokens, nextPacificMidnight, quotaInfo } from './hub_run.mjs';
 import { chunks, formatDate, parseDateCell, serialToDate, fromJsonGrid, toJsonGrid } from './lib/gas.mjs';
 
 assert.equal(new Date(2026, 0, 1).getTimezoneOffset(), -300, 'запускайте с TZ=Asia/Almaty');
@@ -146,5 +146,17 @@ const sql = saveSql(new Map([['Log', big]]));
 for (const s of sql.split('\n')) assert.ok(Buffer.byteLength(s) < 100000, 'выражение D1 < 100 КБ');
 const parts = sql.split('\n').filter((s) => s.startsWith('INSERT')).map((s) => s.match(/, \d+, '(.*)', '[^']*'\);$/)[1].replace(/''/g, "'"));
 assert.deepEqual(JSON.parse(parts.join('')).length, 6000, 'части склеиваются обратно');
+
+// --- лимит Google Ads: когда обновится ---
+{
+  const now = new Date('2026-11-24T02:00:00Z'); // 07:00 Алматы = 18:00 23.11 в Лос-Анджелесе (PST, UTC−8)
+  assert.equal(nextPacificMidnight(now).toISOString(), '2026-11-24T08:00:00.000Z', 'полночь PST = 13:00 Алматы');
+  assert.equal(nextPacificMidnight(new Date('2026-07-01T02:00:00Z')).toISOString(), '2026-07-01T07:00:00.000Z', 'летом PDT, UTC−7');
+  const body = '[{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","details":[{"errors":[{"errorCode":{"quotaError":"RESOURCE_EXHAUSTED"},"details":{"quotaErrorDetails":{"rateScope":"DEVELOPER","rateName":"Number of operations for basic access per day","retryDelay":"21600s"}}}]}]}}]';
+  const q = quotaInfo(body, now);
+  assert.equal(q.resetAt.toISOString(), '2026-11-24T08:00:00.000Z'); assert.match(q.rateName, /per day/);
+  assert.equal(quotaInfo('{"error":{"status":"RESOURCE_EXHAUSTED","details":[{"retryDelay":"30s"}]}}', now), null, 'короткая пауза — не дневной лимит');
+  assert.equal(quotaInfo('Resource has been exhausted (e.g. check quota). RESOURCE_EXHAUSTED', now).resetAt.toISOString(), '2026-11-24T08:00:00.000Z', 'без retryDelay — полночь PST');
+}
 
 console.log('✅ hub_selftest: все проверки пройдены');

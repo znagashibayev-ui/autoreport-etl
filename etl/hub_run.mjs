@@ -102,6 +102,34 @@ export function totalTokens(total) {
   };
 }
 
+/* ---------------- лимит Google Ads ---------------- */
+
+/** Смещение Тихоокеанского времени от UTC в момент t, мс. */
+function laOffset(t) {
+  const p = {};
+  for (const x of new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' }).formatToParts(t)) p[x.type] = +x.value;
+  return { off: Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t.getTime() / 1000) * 1000, p };
+}
+/** Полночь по Тихоокеанскому времени: k = 0 — начало текущих суток, 1 — следующая (так Google считает сутки квоты).
+ *  Смещение пересчитывается для самой полуночи — в дни перевода часов сутки длятся 23 или 25 часов. */
+export function pacificMidnight(now = new Date(), k = 1) {
+  const { off, p } = laOffset(now);
+  const wall = Date.UTC(p.year, p.month - 1, p.day + k);
+  const guess = new Date(wall - off);
+  return new Date(wall - laOffset(guess).off);
+}
+export const nextPacificMidnight = (now = new Date()) => pacificMidnight(now, 1);
+
+/** Ответ 429 Google Ads → { resetAt, rateName } для дневного лимита; null — короткое ограничение частоты (секунды). */
+export function quotaInfo(text, now = new Date()) {
+  const s = String(text || '');
+  if (!/RESOURCE_EXHAUSTED|429/.test(s)) return null;
+  const delay = Number((/"retryDelay"\s*:\s*"(\d+)(?:\.\d+)?s"/.exec(s) || [])[1] || 0);
+  const rateName = (/"rateName"\s*:\s*"([^"]+)"/.exec(s) || [])[1] || '';
+  if (delay && delay <= 60 && !/day/i.test(rateName)) return null;
+  return { resetAt: delay ? new Date(now.getTime() + delay * 1000) : nextPacificMidnight(now), rateName, delay };
+}
+
 /* ---------------- среда Hub ---------------- */
 
 /**
@@ -112,6 +140,13 @@ export function buildHub({ sheets, props, secretKeys, tokenFor2, getToken, http 
   const hub = new Spreadsheet({ id: HUB_ID, title: 'Autoreport Hub', names: [...sheets.keys()].filter((n) => n !== PROPS_SHEET), load: (n) => sheets.get(n) || [] });
   const mps = new Map();
   const mails = [];
+  const quota = []; // дневной лимит Google Ads исчерпан: { resetAt, rateName }
+  const httpRaw = http;
+  http = (url, o) => {
+    const r = httpRaw(url, o);
+    if (r.code === 429 && url.includes('googleads.googleapis.com')) { const q = quotaInfo(r.text); if (q) quota.push(q); }
+    return r;
+  };
   const open = openMp || ((id) => openGoogleSpreadsheet(getToken, id, http));
   /** Записать изменённые листы медиапланов; ошибка — наружу (её поймает код Hub, как ошибку setValues). */
   const flushMps = () => {
@@ -173,7 +208,7 @@ export function buildHub({ sheets, props, secretKeys, tokenFor2, getToken, http 
     if (t) return t;
     throw new Error('Нет токена ' + platform + ': в листе Total (All_Tokens) нет строки с этим кабинетом или Dealer_ID ' + dealer.dealer_id);
   };
-  return { ctx, hub, flushHub, flushMps, mails };
+  return { ctx, hub, flushHub, flushMps, mails, quota };
 }
 
 /**
@@ -300,6 +335,14 @@ async function main() {
       const ran = env.hub.getSheetByName('Registry');
       if (ran && ran.dirty) ran.grid = mergeRegistryStatus(loadHubSheets(d1Query, 'Registry').get('Registry'), ran._grid());
       env.flushHub({ withRegistry: true });
+      // лимит Google Ads исчерпан — сайт перезапустит Hub (daily), как только лимит обновится
+      if (env.quota.length && !dry && ['daily', 'continue', 'monthly-auto', 'monthly', 'custom'].includes(mode)) {
+        const resetAt = new Date(Math.max(...env.quota.map((q) => q.resetAt.getTime()))).toISOString();
+        try {
+          d1ExecFile(`INSERT INTO gads_exhausted (at, source, mode, reset_at, detail) VALUES (${sqlLiteral(new Date().toISOString())}, 'hub', ${sqlLiteral(mode)}, ${sqlLiteral(resetAt)}, ${sqlLiteral(env.quota.length + ' ответов 429; ' + (env.quota[0].rateName || 'дневной лимит'))});`, 'gads-exhausted');
+          say(`⛔ Лимит Google Ads исчерпан (${env.quota.length} ответов 429). Сайт перезапустит Hub после ${resetAt}.`);
+        } catch (e) { say('⚠️ Не записал исчерпание лимита в базу — автоперезапуска не будет: ' + e.message); }
+      }
     }
     if (env.mails.length) say('\n## Письмо проверки (на сайте — вкладка «Проверка»)\n```\n' + env.mails.join('\n\n').slice(0, 6000) + '\n```');
     sheets = loadHubSheets();
