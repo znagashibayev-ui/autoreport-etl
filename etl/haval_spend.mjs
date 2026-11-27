@@ -13,8 +13,16 @@ import { applyRates, buildFx } from './lib/fx.mjs';
 import { DAILY_COLUMNS } from './migrate_bq.mjs';
 import { PLATFORM, loadMap, nightlyMeta, plan, toDaily } from './lib/haval_dealers.mjs';
 
-export const REPORT_URL = 'https://fb-leads-haval.d-sarybek.workers.dev/report';
-export const TABLE = 'haval_spend';
+// BRAND=changan — тот же загрузчик для воркера fb-leads-changan (таблица changan_spend, свои ключ и список кабинетов).
+const BRANDS = {
+  haval: { worker: 'fb-leads-haval', key: 'HAVAL_REPORT_KEY', brand: null },
+  changan: { worker: 'fb-leads-changan', key: 'CHANGAN_REPORT_KEY', brand: 'Changan' }
+};
+export const BRAND_NAME = process.env.BRAND || 'haval';
+const BRAND = BRANDS[BRAND_NAME];
+if (!BRAND) throw new Error('Неизвестный BRAND: ' + BRAND_NAME);
+export const REPORT_URL = `https://${BRAND.worker}.d-sarybek.workers.dev/report`;
+export const TABLE = BRAND_NAME + '_spend';
 export const COLUMNS = ['date', 'account_id', 'account_name', 'dealership', 'mark', 'currency', 'spend', 'impressions', 'clicks', 'meta_leads', 'loaded'];
 const MAX_DAYS = 93;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -94,8 +102,8 @@ export function replaceSql(period, rows) {
 }
 
 const HTTP_HINT = {
-  403: 'неверный ключ — проверьте секрет HAVAL_REPORT_KEY в GitHub',
-  503: 'в воркере fb-leads-haval не задан REPORT_KEY',
+  403: `неверный ключ — проверьте секрет ${BRAND.key} в GitHub`,
+  503: `в воркере ${BRAND.worker} не задан REPORT_KEY`,
   502: 'Meta отдала не все кабинеты — выгрузка неполная, ничего не записано; повторится завтра (или запустите вручную позже)'
 };
 
@@ -124,21 +132,21 @@ export async function fetchPeriod(key, q, fetchFn = fetch) {
 }
 
 async function main() {
-  const key = String(process.env.HAVAL_REPORT_KEY || '').trim();
+  const key = String(process.env[BRAND.key] || '').trim();
   const from = String(process.env.FROM || '').trim();
   const to = String(process.env.TO || '').trim();
   const noWrite = process.env.NO_WRITE === '1';
-  const runId = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14) + '-haval';
+  const runId = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14) + '-' + BRAND_NAME;
   const detail = { periods: [] };
   let status = 'done';
 
-  if (!noWrite) d1ExecFile(buildInserts('etl_runs', ['id', 'kind', 'started', 'status'], [{ id: runId, kind: 'haval', started: new Date().toISOString(), status: 'running' }]).join('\n'), 'haval-start');
+  if (!noWrite) d1ExecFile(buildInserts('etl_runs', ['id', 'kind', 'started', 'status'], [{ id: runId, kind: BRAND_NAME, started: new Date().toISOString(), status: 'running' }]).join('\n'), BRAND_NAME + '-start');
   try {
-    if (!key) throw new Error('Не задан секрет HAVAL_REPORT_KEY (GitHub → Settings → Secrets and variables → Actions)');
+    if (!key) throw new Error(`Не задан секрет ${BRAND.key} (GitHub → Settings → Secrets and variables → Actions)`);
     if (Boolean(from) !== Boolean(to)) throw new Error('Для истории укажите и начало, и конец');
     const parts = from ? chunks(from, to) : [{ days: 28 }];
     // Кабинеты → дилеры отчёта (daily_statistics, Meta). Ночная выгрузка Meta важнее: её кабинеты и дилеры не трогаем.
-    const map = loadMap();
+    const map = loadMap(BRAND_NAME);
     const nightly = nightlyMeta(d1Query(`SELECT Dealer_ID, account_id FROM cc_dealers WHERE Platform = ${sqlLiteral(PLATFORM)}`));
     const fxTables = buildFx({
       rates: d1Query('SELECT month, Platform, Dealer_ID, usd, eur FROM fx_rates'),
@@ -151,11 +159,11 @@ async function main() {
       const spend = rows.reduce((s, r) => s + r.spend, 0);
       const accounts = new Set(rows.map((r) => r.account_id)).size;
       say(`${period.from}..${period.to}: строк ${rows.length}, кабинетов ${accounts}, расход ${spend.toFixed(2)} USD, лидов Meta ${rows.reduce((s, r) => s + r.meta_leads, 0)}`);
-      if (unmapped > 0) say(`  ⚠️ Кабинетов без дилера в справочнике воркера: ${unmapped} — напишите владельцу воркера fb-leads-haval`);
+      if (unmapped > 0) say(`  ⚠️ Кабинетов без дилера в справочнике воркера: ${unmapped} — напишите владельцу воркера ${BRAND.worker}`);
 
       const { write, report } = plan(rows, map, nightly);
       lastReport = report;
-      const daily = toDaily(rows, write);
+      const daily = toDaily(rows, write, BRAND.brand);
       const fx = applyRates(daily, fxTables);
       for (const m of fx.missing) say(`  ❌ Нет курса USD за ${m.month} (${m.Dealer_ID}) — расход в тенге пустой; задайте курс на сайте («Курсы валют»).`);
       const ids = [...new Set([...write.values()].map((m) => m.dealerId))];
@@ -167,7 +175,7 @@ async function main() {
             `AND Date BETWEEN ${sqlLiteral(period.from)} AND ${sqlLiteral(period.to)};\n` +
             buildInserts('daily_statistics', [...DAILY_COLUMNS, 'Spend_Native', 'Currency'], daily).join('\n') + '\n';
         }
-        d1ExecFile(sql, `haval-${period.from}`);
+        d1ExecFile(sql, `${BRAND_NAME}-${period.from}`);
       }
       detail.periods.push({ ...period, rows: rows.length, accounts, spend: Math.round(spend * 100) / 100, unmapped, dealers: ids.length, dailyRows: daily.length });
     }
@@ -185,7 +193,7 @@ async function main() {
     detail.error = String(e.message || e).slice(0, 1000);
     say('❌ ' + detail.error);
   }
-  if (!noWrite) d1ExecFile(`UPDATE etl_runs SET finished = ${sqlLiteral(new Date().toISOString())}, status = ${sqlLiteral(status)}, detail = ${sqlLiteral(JSON.stringify(detail))} WHERE id = ${sqlLiteral(runId)};`, 'haval-end');
+  if (!noWrite) d1ExecFile(`UPDATE etl_runs SET finished = ${sqlLiteral(new Date().toISOString())}, status = ${sqlLiteral(status)}, detail = ${sqlLiteral(JSON.stringify(detail))} WHERE id = ${sqlLiteral(runId)};`, BRAND_NAME + '-end');
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n') + '\n');
   if (status === 'failed') process.exitCode = 1;
 }

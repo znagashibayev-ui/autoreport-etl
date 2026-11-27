@@ -5,7 +5,7 @@ name: Снимки дашборда
 
 on:
   workflow_run:
-    workflows: ['Ночная выгрузка', 'Расход Haval/Tank', 'Восстановление недолётов', 'Копия из BigQuery', 'Google Ads: токен MCC']
+    workflows: ['Ночная выгрузка', 'Расход Haval/Tank', 'Расход Changan', 'Восстановление недолётов', 'Копия из BigQuery', 'Google Ads: токен MCC']
     types: [completed]
   workflow_dispatch:
     inputs:
