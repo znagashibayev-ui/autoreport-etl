@@ -368,6 +368,18 @@ function mhrPickResult(acts, cfg) {
   return f ? { value: f.value, source: f.source + ' (по objective)' } : { value: 0, source: 'не определено' };
 }
 
+/** Раскладывает целое total по весам, сумма точно = total (метод наибольшего остатка). Веса ≥ 0, сумма весов > 0. */
+export function splitIntByWeights(total, weights) {
+  const sum = weights.reduce((a, b) => a + b, 0);
+  if (!(sum > 0) || !(total > 0)) return weights.map(() => 0);
+  const raw = weights.map((w) => (total * w) / sum);
+  const out = raw.map(Math.floor);
+  let left = total - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((r, i) => [r - out[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (let j = 0; left > 0 && j < order.length; j++, left--) out[order[j][1]] += 1;
+  return out;
+}
+
 /** «Результат» строки ad set — mhrResultFor_. */
 export function mhrResultFor(r, meta) {
   const acts = mhrActionsMap(r.actions, r.conversions);
@@ -616,33 +628,16 @@ export async function metaDealerRows(o) {
       const daily = dailySums[cId] || 0;
       const keys = Object.keys(totalsByCamp).filter((k) => (totalsByCamp[k].campaignId || totalsByCamp[k].cName) === cId).sort();
       if (etalon > daily) {
-        const deficit = etalon - daily;
         if (keys.length === 0) continue; // кампания целиком вне окна — не приклеиваем к чужому дню (как в оригинале)
-        let totalImpr = 0;
-        for (const k of keys) totalImpr += totalsByCamp[k].impr;
-        if (totalImpr > 0) {
-          let distributed = 0; let maxKey = keys[0]; let maxVal = -1;
-          for (const k of keys) {
-            const qImpr = totalsByCamp[k].impr;
-            if (qImpr > maxVal) { maxVal = qImpr; maxKey = k; }
-            const portion = Math.floor(deficit * (qImpr / totalImpr));
-            totalsByCamp[k].convs += portion;
-            distributed += portion;
-          }
-          const left = deficit - distributed;
-          if (left > 0) totalsByCamp[maxKey].convs += left;
-        } else {
-          totalsByCamp[keys[keys.length - 1]].convs += deficit;
-        }
+        // недостача — по дням пропорционально показам (если показов нет — на последний день)
+        const imprW = keys.map((k) => totalsByCamp[k].impr);
+        const add = imprW.some((w) => w > 0) ? splitIntByWeights(Math.round(etalon - daily), imprW) : keys.map((_, i) => (i === keys.length - 1 ? Math.round(etalon - daily) : 0));
+        keys.forEach((k, i) => { totalsByCamp[k].convs += add[i]; });
       } else if (etalon < daily && daily > 0) {
-        const ratio = etalon / daily;
-        let runSum = 0;
-        for (let i = 0; i < keys.length - 1; i++) {
-          const nv = Math.floor(totalsByCamp[keys[i]].convs * ratio);
-          totalsByCamp[keys[i]].convs = nv;
-          runSum += nv;
-        }
-        if (keys.length > 0) totalsByCamp[keys[keys.length - 1]].convs = Math.max(0, etalon - runSum);
+        // перебор — уменьшаем дни пропорционально их конверсиям, сумма строго = эталон.
+        // Раньше: Math.floor по дням + весь остаток на последний день → дни с 1–2 конверсиями обнулялись, а вчера получал 20+ чужих.
+        const nv = splitIntByWeights(etalon, keys.map((k) => totalsByCamp[k].convs));
+        keys.forEach((k, i) => { totalsByCamp[k].convs = nv[i]; });
       }
     }
   } catch (err) {
