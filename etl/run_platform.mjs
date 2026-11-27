@@ -114,7 +114,7 @@ const PLATFORMS = {
     dealers: (values, registry) => accountDealers(values, registry, 'Google_Customer_ID', 'Google_Token', 'Google', 'customerId', (r, h) => {
       const dealerId = r[0] ? r[0].toString().trim() : '';
       const raw = h.indexOf('Dealer_Type') > -1 && r[h.indexOf('Dealer_Type')] ? r[h.indexOf('Dealer_Type')].toString().trim().toLowerCase() : '';
-      return { dealerType: dealerId.toLowerCase().includes('distributor') ? 'Дистрибьютор' : raw === 'системный' ? 'Системный' : raw === 'не системный' ? 'Не системный' : 'Не указан' };
+      return { dealerType: dealerId.toLowerCase().includes('distributor') ? 'Дистрибьютор' : raw === 'системный' ? 'Системный' : raw === 'не системный' ? 'Не системный' : /^dealer_/i.test(dealerId) ? 'Дилер' : 'Не указан' };
     }),
     /** Ключи приложения Google (секреты GitHub) и правила Autoreport Hub (Registry + Overrides). */
     async prepare(token, say) {
